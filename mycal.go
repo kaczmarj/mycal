@@ -12,6 +12,8 @@ func main() {
 	filename := flag.String("in", "", ".ics file to modify")
 	outFile := flag.String("out", "", "Output filename.")
 	prefix := flag.String("pre", "[MANDATORY] ", "Prefix for title of each mandatory event.")
+	remind := flag.Bool("remind", false, "If supplied, set a reminder MIN minutes before event.")
+	min := flag.Int("min", 30, "Reminder N minutes before event.")
 	flag.Parse()
 
 	if *filename == "" {
@@ -20,6 +22,12 @@ func main() {
 
 	if *outFile == "" {
 		log.Fatalln("Error: please supply output filename")
+	}
+
+	if *remind {
+		if *min < 0 {
+			log.Fatalln("Error: min argument must be non-negative")
+		}
 	}
 
 	sep := "\n"
@@ -34,6 +42,11 @@ func main() {
 	mandatory := getMandatorySummaryIndices(ical)
 	fmt.Printf("Adding '%s' to %d events ...\n", *prefix, len(mandatory))
 	prependPrefixToSummaries(ical, *prefix, mandatory)
+
+	if *remind {
+		fmt.Printf("Adding %d-minute alarm for %d events ...\n", *min, len(mandatory))
+		ical = addAlarm(ical, *min, mandatory)
+	}
 
 	newIcal := strings.Join(ical, sep)
 	err = ioutil.WriteFile(*outFile, []byte(newIcal), 0644)
@@ -72,4 +85,19 @@ func prependPrefixToSummaries(iCalendar []string, prefix string, idsToChange []i
 		n := strings.Replace(iCalendar[j], summary, pre, 1)
 		iCalendar[j] = n
 	}
+}
+
+func addAlarm(iCalendar []string, minBeforeEvent int, idsToChange []int) []string {
+	trigger := fmt.Sprintf("TRIGGER:-PT%dM", minBeforeEvent)
+	alarm := []string{"BEGIN:VALARM", trigger, "ACTION:DISPLAY", "DESCRIPTION:Reminder", "END:VALARM"}
+
+	// Append alarm just before the summary section of the vevent.
+	// https://github.com/golang/go/wiki/SliceTricks#insertvector
+	alarmLen := len(alarm)
+	for offset, j := range idsToChange {
+		// Account for change in indices whenever we append to the array.
+		j += offset * alarmLen
+		iCalendar = append(iCalendar[:j], append(alarm, iCalendar[j:]...)...)
+	}
+	return iCalendar
 }
